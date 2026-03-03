@@ -2,12 +2,8 @@ package com.fastt.app.ui
 
 import android.app.DownloadManager
 import android.content.Context
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Environment
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -44,8 +40,6 @@ import kotlinx.coroutines.withContext
 @Composable
 fun HomeScreen(
     store: SettingsStore,
-    prefillUrl: String?,
-    onPrefillConsumed: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     val ctx = LocalContext.current
@@ -56,37 +50,9 @@ fun HomeScreen(
     var loading by remember { mutableStateOf(false) }
     var data by remember { mutableStateOf<TiktokData?>(null) }
 
-    val tutorialDone by store.tutorialDone.collectAsState(initial = false)
-    var showTutorial by remember { mutableStateOf(false) }
-
-    LaunchedEffect(tutorialDone) {
-        if (!tutorialDone) {
-            showTutorial = true
-            // Mark as done once it has been shown at least once, so it won\'t reappear every launch.
-            scope.launch { store.setTutorialDone(true) }
-        }
-    }
-
     val apiKey by store.apiKey.collectAsState(initial = "Neveloopp")
+
     val api = remember(apiKey) { TiktokApi { apiKey } }
-
-
-    // Prefill from Share sheet / deep link
-    LaunchedEffect(prefillUrl) {
-        val u = prefillUrl?.trim().orEmpty()
-        if (u.isNotBlank()) {
-            input = u
-            onPrefillConsumed()
-        }
-    }
-
-    // Permissions
-    val notifyPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    val storagePermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-
-    LaunchedEffect(Unit) {
-        requestStartupPermissions(ctx, notifyPermLauncher, storagePermLauncher)
-    }
 
     val infinite = rememberInfiniteTransition(label = "spin")
     val rot by infinite.animateFloat(
@@ -112,49 +78,14 @@ fun HomeScreen(
         },
         snackbarHost = { SnackbarHost(hostState = snack) }
     ) { pad ->
-        androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
-            // Animated petals background
-            PetalBackground(modifier = Modifier.fillMaxSize())
-
-            if (showTutorial) {
-            AlertDialog(
-                onDismissRequest = { /* block */ },
-                title = { Text("Bienvenido a Fastt") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("1) Copia un link de TikTok y pégalo aquí.")
-                        Text("2) Dale Buscar para cargar la info.")
-                        Text("3) Dale Descargar y se guardará en Movies/Fastt.")
-                        Text("Tip: desde TikTok, Compartir → Más → Fastt.")
-                    }
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            showTutorial = false
-                            scope.launch { store.setTutorialDone(true) }
-                        }
-                    ) { Text("Entendido") }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = {
-                            showTutorial = false
-                            scope.launch { store.setTutorialDone(true) }
-                        }
-                    ) { Text("Saltar") }
-                }
-            )
-            }
-
-            Column(
-                modifier = Modifier
-                    .padding(pad)
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
+        Column(
+            modifier = Modifier
+                .padding(pad)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             // Animated logo
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -193,12 +124,9 @@ fun HomeScreen(
                         scope.launch {
                             val res = withContext(Dispatchers.IO) { api.fetch(url) }
                             loading = false
-                            res.onSuccess { resp ->
-                                if (resp.success && resp.data != null) {
-                                    data = resp.data
-                                } else {
-                                    snack.showSnackbar(ctx.getString(R.string.network_error) + " " + ("Invalid response"))
-                                }
+                            res.onSuccess {
+                                if (it.success && it.data != null) data = it.data
+                                else snack.showSnackbar(ctx.getString(R.string.api_error))
                             }.onFailure {
                                 snack.showSnackbar(ctx.getString(R.string.network_error) + " " + (it.message ?: ""))
                             }
@@ -226,23 +154,7 @@ fun HomeScreen(
                 data?.let { d ->
                     ResultCard(
                         data = d,
-                        onDownload = {
-                            // Android 13+ needs runtime notification permission for progress notifications.
-                            if (Build.VERSION.SDK_INT >= 33) {
-                                if (ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                                    notifyPermLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                                }
-                            }
-
-                            // Pre-Android 10 may require storage permission for public folders.
-                            if (Build.VERSION.SDK_INT < 29) {
-                                if (ctx.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                                    storagePermLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                                }
-                            }
-
-                            startDownload(ctx, d, snack, scope)
-                        }
+                        onDownload = { startDownload(ctx, d, snack, scope) }
                     )
                 }
             }
@@ -253,7 +165,6 @@ fun HomeScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            }
         }
     }
 }
@@ -330,35 +241,6 @@ private fun ResultCard(
     }
 }
 
-
-private fun requestStartupPermissions(
-    context: Context,
-    notifyPermLauncher: androidx.activity.result.ActivityResultLauncher<String>,
-    storagePermLauncher: androidx.activity.result.ActivityResultLauncher<String>
-) {
-    // Notifications (Android 13+)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        val perm = android.Manifest.permission.POST_NOTIFICATIONS
-        if (context.checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) {
-            notifyPermLauncher.launch(perm)
-        }
-    }
-
-    // Storage / media (requested by user)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        val permVideo = android.Manifest.permission.READ_MEDIA_VIDEO
-        if (context.checkSelfPermission(permVideo) != PackageManager.PERMISSION_GRANTED) {
-            storagePermLauncher.launch(permVideo)
-        }
-    } else {
-        val perm = android.Manifest.permission.READ_EXTERNAL_STORAGE
-        if (context.checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) {
-            storagePermLauncher.launch(perm)
-        }
-    }
-}
-
-
 private fun startDownload(
     context: Context,
     data: TiktokData,
@@ -366,33 +248,14 @@ private fun startDownload(
     scope: kotlinx.coroutines.CoroutineScope
 ) {
     val url = data.videoUrl ?: return
-
-    fun sanitize(name: String): String {
-        // Keep it filesystem safe
-        val cleaned = name
-            .replace(Regex("\\s+"), " ")
-            .replace(Regex("[^a-zA-Z0-9 _.-]"), "")
-            .trim()
-        return cleaned.take(60).ifBlank { "TikTok" }
-    }
-
-    val baseTitle = sanitize(data.description ?: "TikTok")
-    val id = data.id ?: System.currentTimeMillis().toString()
-    val filename = "${baseTitle}_${id}.mp4"
-
+    val filename = "Fastt_${data.id ?: System.currentTimeMillis()}.mp4"
     val request = DownloadManager.Request(Uri.parse(url)).apply {
-        setTitle(baseTitle)
+        setTitle(filename)
         setDescription("TikTok video")
         setAllowedOverMetered(true)
         setAllowedOverRoaming(true)
         setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-
-        // Save outside Downloads.
-        setDestinationInExternalPublicDir(Environment.DIRECTORY_MOVIES, "Fastt/$filename")
-
-        // TikTok often requires these headers.
-        addRequestHeader("User-Agent", "Mozilla/5.0")
-        addRequestHeader("Referer", "https://www.tiktok.com/")
+        setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename)
     }
     val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
     dm.enqueue(request)

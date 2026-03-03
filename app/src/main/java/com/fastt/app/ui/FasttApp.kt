@@ -1,6 +1,5 @@
 package com.fastt.app.ui
 
-import android.app.Activity
 import android.app.Application
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.runtime.*
@@ -14,19 +13,14 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 @Composable
-fun FasttApp(
-    sharedUrl: String?,
-    onSharedUrlConsumed: () -> Unit
-) {
+fun FasttApp() {
     val ctx = LocalContext.current
-    val activity = ctx as? Activity
     val store = remember { SettingsStore(ctx) }
     val scope = rememberCoroutineScope()
 
     var theme by remember { mutableStateOf("system") }
     var lang by remember { mutableStateOf("system") }
     var accent by remember { mutableStateOf(0) }
-    var lastAppliedLang by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         store.theme.collectLatest { theme = it }
@@ -40,12 +34,6 @@ fun FasttApp(
                 else -> LocaleListCompat.getEmptyLocaleList()
             }
             AppCompatDelegate.setApplicationLocales(locales)
-
-            // Force recreation only when user changes language.
-            if (lastAppliedLang != null && lastAppliedLang != it) {
-                activity?.recreate()
-            }
-            lastAppliedLang = it
         }
     }
     LaunchedEffect(Unit) {
@@ -59,8 +47,6 @@ fun FasttApp(
             composable("home") {
                 HomeScreen(
                     store = store,
-                    prefillUrl = sharedUrl,
-                    onPrefillConsumed = onSharedUrlConsumed,
                     onOpenSettings = { nav.navigate("settings") }
                 )
             }
