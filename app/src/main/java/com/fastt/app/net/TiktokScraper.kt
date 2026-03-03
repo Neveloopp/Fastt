@@ -4,11 +4,9 @@ import com.fastt.app.model.TiktokData
 import com.google.gson.Gson
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Locale
-import kotlin.math.roundToInt
 
 class TiktokScraper {
 
@@ -18,7 +16,8 @@ class TiktokScraper {
         .followSslRedirects(false)
         .build()
 
-    private val ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    private val ua =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
     private val paramsBase = mapOf(
         "aid" to "1988",
@@ -38,14 +37,12 @@ class TiktokScraper {
 
     fun fetch(tiktokUrl: String): Result<TiktokData> {
         return try {
-            val id = extractVideoId(tiktokUrl) ?: resolveShortUrl(tiktokUrl)
-                ?: return Result.failure(RuntimeException("Could not extract video ID"))
+            val id = extractVideoId(tiktokUrl)
+                ?: resolveShortUrl(tiktokUrl)
+                ?: throw IllegalArgumentException("Could not extract video ID")
 
-            val meta = getMetadata(id)
-                ?: return Result.failure(RuntimeException("Could not get metadata"))
-
-            val videoUrl = getVideoUrl(meta)
-                ?: return Result.failure(RuntimeException("Could not get video url"))
+            val meta = getMetadata(id) ?: throw IllegalStateException("Could not get metadata")
+            val videoUrl = getVideoUrl(meta) ?: throw IllegalStateException("Could not resolve video URL")
 
             Result.success(toData(id, meta, videoUrl))
         } catch (e: Exception) {
@@ -54,10 +51,10 @@ class TiktokScraper {
     }
 
     private fun extractVideoId(input: String): String? {
-        val trimmed = input.trim()
-        if (trimmed.matches(Regex("^\\d{15,25}$"))) return trimmed
-        Regex("/video/(\\d+)").find(trimmed)?.groupValues?.getOrNull(1)?.let { return it }
-        Regex("/photo/(\\d+)").find(trimmed)?.groupValues?.getOrNull(1)?.let { return it }
+        val s = input.trim()
+        if (s.matches(Regex("^\\d{15,25}$"))) return s
+        Regex("/video/(\\d+)").find(s)?.groupValues?.getOrNull(1)?.let { return it }
+        Regex("/photo/(\\d+)").find(s)?.groupValues?.getOrNull(1)?.let { return it }
         return null
     }
 
@@ -69,34 +66,49 @@ class TiktokScraper {
                 .build()
 
             client.newCall(req).execute().use { res ->
-                val loc = res.header("location") ?: res.header("Location")
-                val target = loc ?: res.request.url.toString()
-                Regex("/video/(\\d+)").find(target)?.groupValues?.getOrNull(1)
+                val loc = res.header("location").orEmpty()
+                Regex("/video/(\\d+)").find(loc)?.groupValues?.getOrNull(1)?.let { return it }
+                if (loc.isNotBlank()) {
+                    val req2 = Request.Builder()
+                        .url(loc)
+                        .header("User-Agent", ua)
+                        .build()
+                    client.newCall(req2).execute().use { res2 ->
+                        val loc2 = res2.header("location") ?: res2.request.url.toString()
+                        Regex("/video/(\\d+)").find(loc2)?.groupValues?.getOrNull(1)?.let { return it }
+                    }
+                }
             }
+            null
         } catch (_: Exception) {
             null
         }
     }
 
     private fun buildUrl(base: String, params: Map<String, String>): String {
-        val q = params.entries.joinToString("&") { (k, v) ->
-            "${URLEncoder.encode(k, StandardCharsets.UTF_8.toString())}=${URLEncoder.encode(v, StandardCharsets.UTF_8.toString())}"
-        }
-        return "$base?$q"
+        val sb = StringBuilder(base)
+        if (!base.contains("?")) sb.append("?") else sb.append("&")
+        sb.append(
+            params.entries.joinToString("&") {
+                val k = URLEncoder.encode(it.key, StandardCharsets.UTF_8.toString())
+                val v = URLEncoder.encode(it.value, StandardCharsets.UTF_8.toString())
+                "$k=$v"
+            }
+        )
+        return sb.toString()
     }
 
-    @Suppress("UNCHECKED_CAST")
     private fun getMetadata(videoId: String): Map<String, Any?>? {
-        // 1) JSON endpoint
-        try {
-            val url = buildUrl(
-                "https://www.tiktok.com/api/item/detail/",
-                paramsBase + mapOf(
-                    "itemId" to videoId,
-                    "coverFormat" to "2",
-                    "video_encoding" to "mp4",
-                )
+        val url = buildUrl(
+            "https://www.tiktok.com/api/item/detail/",
+            paramsBase + mapOf(
+                "itemId" to videoId,
+                "coverFormat" to "2",
+                "video_encoding" to "mp4"
             )
+        )
+
+        try {
             val req = Request.Builder()
                 .url(url)
                 .header("User-Agent", ua)
@@ -106,17 +118,14 @@ class TiktokScraper {
 
             client.newCall(req).execute().use { res ->
                 val body = res.body?.string().orEmpty()
-                if (res.isSuccessful && body.isNotBlank()) {
-                    val parsed = gson.fromJson(body, Map::class.java) as Map<String, Any?>
-                    val itemInfo = parsed["itemInfo"] as? Map<String, Any?>
-                    val itemStruct = itemInfo?.get("itemStruct") as? Map<String, Any?>
-                    if (itemStruct != null) return itemStruct
-                }
+                val obj = gson.fromJson(body, Map::class.java) as? Map<*, *> ?: return null
+                val itemInfo = obj["itemInfo"] as? Map<*, *> ?: return null
+                val itemStruct = itemInfo["itemStruct"] as? Map<String, Any?>
+                if (itemStruct != null) return itemStruct
             }
         } catch (_: Exception) {
         }
 
-        // 2) HTML fallback (__UNIVERSAL_DATA_FOR_REHYDRATION__)
         try {
             val req = Request.Builder()
                 .url("https://www.tiktok.com/@_/video/$videoId")
@@ -126,13 +135,17 @@ class TiktokScraper {
 
             client.newCall(req).execute().use { res ->
                 val html = res.body?.string().orEmpty()
-                val m = Regex("<script\\s+id=\"__UNIVERSAL_DATA_FOR_REHYDRATION__\"[^>]*>(.*?)</script>", setOf(RegexOption.DOT_MATCHES_ALL)).find(html)
-                val rawJson = m?.groupValues?.getOrNull(1) ?: return null
-                val parsed = gson.fromJson(rawJson, Map::class.java) as Map<String, Any?>
-                val defaultScope = parsed["__DEFAULT_SCOPE__"] as? Map<String, Any?>
-                val detail = defaultScope?.get("webapp.video-detail") as? Map<String, Any?>
-                val itemInfo = detail?.get("itemInfo") as? Map<String, Any?>
-                val itemStruct = itemInfo?.get("itemStruct") as? Map<String, Any?>
+                val re = Regex(
+                    "<script\\s+id=\"__UNIVERSAL_DATA_FOR_REHYDRATION__\"[^>]*>(.*?)</script>",
+                    setOf(RegexOption.DOT_MATCHES_ALL)
+                )
+                val m = re.find(html) ?: return null
+                val rawJson = m.groupValues[1]
+                val parsed = gson.fromJson(rawJson, Map::class.java) as? Map<*, *> ?: return null
+                val defaultScope = parsed["__DEFAULT_SCOPE__"] as? Map<*, *> ?: return null
+                val detail = defaultScope["webapp.video-detail"] as? Map<*, *> ?: return null
+                val itemInfo = detail["itemInfo"] as? Map<*, *> ?: return null
+                val itemStruct = itemInfo["itemStruct"] as? Map<String, Any?>
                 if (itemStruct != null) return itemStruct
             }
         } catch (_: Exception) {
@@ -142,7 +155,6 @@ class TiktokScraper {
     }
 
     private fun getVideoUrl(meta: Map<String, Any?>): String? {
-        // Try to extract a list of candidates (playAddr/downloadAddr/urlList)
         val video = meta["video"] as? Map<*, *> ?: return null
 
         fun addUrlList(any: Any?, out: MutableList<String>) {
@@ -163,13 +175,16 @@ class TiktokScraper {
         if (bitrateInfo is List<*>) {
             val sorted = bitrateInfo
                 .mapNotNull { it as? Map<*, *> }
-                .sortedByDescending { (it["Bitrate"] as? Number)?.toLong() ?: (it["bitrate"] as? Number)?.toLong() ?: 0L }
+                .sortedByDescending {
+                    (it["Bitrate"] as? Number)?.toLong()
+                        ?: (it["bitrate"] as? Number)?.toLong()
+                        ?: 0L
+                }
             for (br in sorted) {
                 addUrlList(br["PlayAddr"] ?: br["playAddr"], urls)
             }
         }
 
-        // Validate candidates by HEAD
         for (u in urls.distinct()) {
             try {
                 val req = Request.Builder()
@@ -184,6 +199,7 @@ class TiktokScraper {
             } catch (_: Exception) {
             }
         }
+
         return urls.firstOrNull()
     }
 
@@ -205,10 +221,14 @@ class TiktokScraper {
         fun fmt(n: Number?): String {
             val v = n?.toLong() ?: 0L
             return when {
-                v >= 1_000_000 -> ((v / 1_000_000.0) * 10.0).roundToInt() / 10.0
-                    .toString().removeSuffix(".0") + "M"
-                v >= 1_000 -> ((v / 1_000.0) * 10.0).roundToInt() / 10.0
-                    .toString().removeSuffix(".0") + "K"
+                v >= 1_000_000L -> {
+                    val s = String.format(Locale.US, "%.1f", v / 1_000_000.0).removeSuffix(".0")
+                    "${s}M"
+                }
+                v >= 1_000L -> {
+                    val s = String.format(Locale.US, "%.1f", v / 1_000.0).removeSuffix(".0")
+                    "${s}K"
+                }
                 else -> v.toString()
             }
         }
@@ -238,5 +258,12 @@ class TiktokScraper {
             videoUrl = videoUrl,
             thumbnail = cover
         )
+    }
+
+    private operator fun Map<String, String>.plus(other: Map<String, String>): Map<String, String> {
+        val m = LinkedHashMap<String, String>(this.size + other.size)
+        m.putAll(this)
+        m.putAll(other)
+        return m
     }
 }
