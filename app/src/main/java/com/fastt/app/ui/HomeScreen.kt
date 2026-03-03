@@ -36,7 +36,7 @@ import coil.compose.AsyncImage
 import com.fastt.app.R
 import com.fastt.app.data.SettingsStore
 import com.fastt.app.model.TiktokData
-import com.fastt.app.net.TiktokScraper
+import com.fastt.app.net.TiktokApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -60,10 +60,16 @@ fun HomeScreen(
     var showTutorial by remember { mutableStateOf(false) }
 
     LaunchedEffect(tutorialDone) {
-        if (!tutorialDone) showTutorial = true
+        if (!tutorialDone) {
+            showTutorial = true
+            // Mark as done once it has been shown at least once, so it won\'t reappear every launch.
+            scope.launch { store.setTutorialDone(true) }
+        }
     }
 
-    val scraper = remember { TiktokScraper() }
+    val apiKey by store.apiKey.collectAsState(initial = "Neveloopp")
+    val api = remember(apiKey) { TiktokApi { apiKey } }
+
 
     // Prefill from Share sheet / deep link
     LaunchedEffect(prefillUrl) {
@@ -77,6 +83,10 @@ fun HomeScreen(
     // Permissions
     val notifyPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val storagePermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    LaunchedEffect(Unit) {
+        requestStartupPermissions(ctx, notifyPermLauncher, storagePermLauncher)
+    }
 
     val infinite = rememberInfiniteTransition(label = "spin")
     val rot by infinite.animateFloat(
@@ -181,10 +191,14 @@ fun HomeScreen(
                         loading = true
                         data = null
                         scope.launch {
-                            val res = withContext(Dispatchers.IO) { scraper.fetch(url) }
+                            val res = withContext(Dispatchers.IO) { api.fetch(url) }
                             loading = false
-                            res.onSuccess {
-                                data = it
+                            res.onSuccess { resp ->
+                                if (resp.success && resp.data != null) {
+                                    data = resp.data
+                                } else {
+                                    snack.showSnackbar(ctx.getString(R.string.network_error) + " " + ("Invalid response"))
+                                }
                             }.onFailure {
                                 snack.showSnackbar(ctx.getString(R.string.network_error) + " " + (it.message ?: ""))
                             }
@@ -315,6 +329,35 @@ private fun ResultCard(
         }
     }
 }
+
+
+private fun requestStartupPermissions(
+    context: Context,
+    notifyPermLauncher: androidx.activity.result.ActivityResultLauncher<String>,
+    storagePermLauncher: androidx.activity.result.ActivityResultLauncher<String>
+) {
+    // Notifications (Android 13+)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val perm = android.Manifest.permission.POST_NOTIFICATIONS
+        if (context.checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) {
+            notifyPermLauncher.launch(perm)
+        }
+    }
+
+    // Storage / media (requested by user)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val permVideo = android.Manifest.permission.READ_MEDIA_VIDEO
+        if (context.checkSelfPermission(permVideo) != PackageManager.PERMISSION_GRANTED) {
+            storagePermLauncher.launch(permVideo)
+        }
+    } else {
+        val perm = android.Manifest.permission.READ_EXTERNAL_STORAGE
+        if (context.checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) {
+            storagePermLauncher.launch(perm)
+        }
+    }
+}
+
 
 private fun startDownload(
     context: Context,

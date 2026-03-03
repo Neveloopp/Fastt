@@ -17,7 +17,7 @@ class TiktokApi(
         return try {
             val encoded = URLEncoder.encode(url, StandardCharsets.UTF_8.toString())
             val req = Request.Builder()
-                .url("https://api.ananta.qzz.io/api/v2/tiktok?url=$encoded")
+                .url("https://ananta.evogb.org/api/v2/tiktok?url=$encoded")
                 .header("x-api-key", apiKeyProvider())
                 .get()
                 .build()

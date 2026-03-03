@@ -2,6 +2,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Optional; only needed on Android 13+ if you want download notifications to always show -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Storage/media read permissions (Android 13+) -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- Storage read permission (Android 12 and below) -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <!-- For Android 9 and below when saving to public folders -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
@@ -20,15 +25,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
-            <!-- Appear in TikTok share sheet -->
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
-            </intent-filter>
-
-            <!-- Open TikTok links directly -->
+<!-- Open TikTok links directly -->
             <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -39,5 +36,21 @@
                 <data android:scheme="https" android:host="vt.tiktok.com" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".ShareMenuActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Fastt.Transparent"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:finishOnTaskLaunch="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
     </application>
 </manifest>
