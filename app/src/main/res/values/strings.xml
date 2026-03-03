@@ -1,0 +1,29 @@
+<resources>
+    <string name="app_name">Fastt</string>
+
+    <string name="home_title">Fastt</string>
+    <string name="url_hint">Pega el link de TikTok</string>
+    <string name="fetch">Buscar</string>
+    <string name="download">Descargar</string>
+    <string name="open_settings">Configuración</string>
+
+    <string name="settings_title">Configuración</string>
+    <string name="theme">Tema</string>
+    <string name="theme_system">Automático (del sistema)</string>
+    <string name="theme_light">Claro</string>
+    <string name="theme_dark">Oscuro</string>
+
+    <string name="language">Idioma</string>
+    <string name="language_system">Automático (del sistema)</string>
+    <string name="language_es">Español</string>
+    <string name="language_en">English</string>
+
+    <string name="accent">Acento</string>
+    <string name="terms">Términos y condiciones</string>
+    <string name="customize">Interfaz personalizada</string>
+
+    <string name="invalid_url">Pon un link válido de TikTok.</string>
+    <string name="network_error">Error de red.</string>
+    <string name="api_error">La API respondió error.</string>
+    <string name="download_started">Descarga iniciada…</string>
+</resources>
